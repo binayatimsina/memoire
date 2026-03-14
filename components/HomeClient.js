@@ -1,7 +1,9 @@
 'use client'
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+
+const REACTIONS = ['❤️', '😊', '🥹', '😂', '😢', '🎉', '👍']
 
 export default function HomeClient({ user, profile, connection, initialMoments }) {
   const [moments, setMoments] = useState(initialMoments)
@@ -15,6 +17,37 @@ export default function HomeClient({ user, profile, connection, initialMoments }
   async function handleSignOut() {
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  async function handleReaction(momentId, emoji) {
+    const moment = moments.find(m => m.id === momentId)
+    const existingReaction = moment.reactions?.find(r => r.author_id === user.id)
+
+    if (existingReaction?.emoji === emoji) {
+      await supabase.from('reactions').delete().eq('id', existingReaction.id)
+      setMoments(prev => prev.map(m => m.id === momentId ? {
+        ...m,
+        reactions: m.reactions.filter(r => r.id !== existingReaction.id)
+      } : m))
+      return
+    }
+
+    if (existingReaction) {
+      const { data } = await supabase
+        .from('reactions').update({ emoji }).eq('id', existingReaction.id).select().single()
+      setMoments(prev => prev.map(m => m.id === momentId ? {
+        ...m,
+        reactions: m.reactions.map(r => r.id === existingReaction.id ? data : r)
+      } : m))
+      return
+    }
+
+    const { data } = await supabase
+      .from('reactions').insert({ moment_id: momentId, author_id: user.id, emoji }).select().single()
+    setMoments(prev => prev.map(m => m.id === momentId ? {
+      ...m,
+      reactions: [...(m.reactions || []), data]
+    } : m))
   }
 
   return (
@@ -42,7 +75,6 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           pointer-events: none;
         }
 
-        /* HEADER */
         .header {
           position: sticky;
           top: 0;
@@ -113,7 +145,6 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           color: rgba(255,255,255,0.6);
         }
 
-        /* FEED */
         .feed-wrap {
           position: relative;
           z-index: 1;
@@ -125,7 +156,6 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           gap: 20px;
         }
 
-        /* EMPTY STATES */
         .empty-state {
           display: flex;
           flex-direction: column;
@@ -182,7 +212,6 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           transform: translateY(-1px);
         }
 
-        /* MOMENT CARD */
         .moment-card {
           background: rgba(255,255,255,0.04);
           border: 1px solid rgba(255,255,255,0.07);
@@ -251,7 +280,6 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           color: rgba(255,255,255,0.25);
         }
 
-        /* FLOATING ADD BUTTON */
         .fab {
           position: fixed;
           bottom: 28px;
@@ -289,7 +317,6 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           line-height: 1;
         }
 
-        /* Hearts bg */
         .hearts {
           position: fixed;
           inset: 0;
@@ -311,6 +338,84 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           90% { opacity: 0.03; }
           100% { opacity: 0; transform: translateY(-100vh) scale(1.1); }
         }
+
+        /* REACTIONS */
+        .reactions-area {
+          border-top: 1px solid rgba(255,255,255,0.06);
+          padding: 12px 18px 14px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .reaction-picker {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+
+        .reaction-btn {
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 50px;
+          padding: 6px 10px;
+          font-size: 1.1rem;
+          cursor: pointer;
+          transition: all 0.15s;
+          line-height: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .reaction-btn:hover {
+          background: rgba(255,255,255,0.08);
+          border-color: rgba(255,255,255,0.2);
+          transform: scale(1.15);
+        }
+
+        .reaction-btn.selected {
+          background: rgba(192, 80, 58, 0.12);
+          border-color: rgba(232, 130, 106, 0.2);
+          transform: scale(1.1);
+        }
+
+        .reaction-btn.own-moment {
+          opacity: 0.4;
+          cursor: default;
+          pointer-events: none;
+        }
+
+        .reaction-display {
+          display: flex;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+
+        .reaction-chip {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 50px;
+          padding: 3px 10px 3px 6px;
+          font-size: 0.85rem;
+          color: rgba(255,255,255,0.4);
+          animation: popIn 0.2s ease;
+        }
+
+        .reaction-chip.mine {
+          border-color: rgba(232, 130, 106, 0.2);
+          background: rgba(192, 80, 58, 0.12);
+          color: #e8826a;
+        }
+
+        @keyframes popIn {
+          0% { transform: scale(0.7); opacity: 0; }
+          70% { transform: scale(1.1); }
+          100% { transform: scale(1); opacity: 1; }
+        }
       `}</style>
 
       <div className="home-root">
@@ -328,12 +433,10 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           ))}
         </div>
 
-        {/* Header */}
         <header className="header">
           <div className="header-logo">
             Memoire<span>.</span>
           </div>
-
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             {partner && (
               <div className="header-right">
@@ -347,26 +450,25 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           </div>
         </header>
 
-        {/* Feed */}
         <div className="feed-wrap">
           {!connection ? (
             <div className="empty-state">
-                <div className="empty-emoji">🤝</div>
-                <h2 className="empty-title">Share moments with others</h2>
-                <p className="empty-sub">
-                    A friend, a partner, a sibling — invite anyone you want to share memories with
-                </p>
-                <button className="invite-btn" onClick={() => router.push('/connect/invite')}>
-                    Send an Invite
-                </button>
+              <div className="empty-emoji">🤝</div>
+              <h2 className="empty-title">Share moments with others</h2>
+              <p className="empty-sub">
+                A friend, a partner, a sibling — invite anyone you want to share memories with
+              </p>
+              <button className="invite-btn" onClick={() => router.push('/connect/invite')}>
+                Send an Invite
+              </button>
             </div>
           ) : moments.length === 0 ? (
             <div className="empty-state">
-                <div className="empty-emoji">🌱</div>
-                <h2 className="empty-title">Your shared story starts here</h2>
-                <p className="empty-sub">
-                    Post your first photo and note — {partner?.display_name} will see it instantly
-                </p>
+              <div className="empty-emoji">🌱</div>
+              <h2 className="empty-title">Your shared story starts here</h2>
+              <p className="empty-sub">
+                Post your first photo and note — {partner?.display_name} will see it instantly
+              </p>
             </div>
           ) : (
             moments.map(moment => (
@@ -374,12 +476,12 @@ export default function HomeClient({ user, profile, connection, initialMoments }
                 key={moment.id}
                 moment={moment}
                 currentUserId={user.id}
+                onReact={handleReaction}
               />
             ))
           )}
         </div>
 
-        {/* Floating action button */}
         {connection && (
           <button className="fab" onClick={() => router.push('/moment/new')}>
             <span className="fab-icon">+</span>
@@ -391,11 +493,38 @@ export default function HomeClient({ user, profile, connection, initialMoments }
   )
 }
 
-function MomentCard({ moment, currentUserId }) {
+function MomentCard({ moment, currentUserId, onReact }) {
+  const [showPicker, setShowPicker] = useState(false)
+  const pickerRef = useRef(null)
+
+  useEffect(() => {
+    if (!showPicker) return
+    function handleClickOutside(e) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
+        setShowPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showPicker])
+
   const isOwn = moment.author_id === currentUserId
   const date = new Date(moment.created_at).toLocaleDateString('en-US', {
     month: 'long', day: 'numeric', year: 'numeric'
   })
+
+  const reactionMap = {}
+  moment.reactions?.forEach(r => {
+    if (!reactionMap[r.emoji]) reactionMap[r.emoji] = []
+    reactionMap[r.emoji].push(r)
+  })
+
+  const myReaction = moment.reactions?.find(r => r.author_id === currentUserId)
+
+  function handleReactClick(emoji) {
+    onReact(moment.id, emoji)
+    setShowPicker(false)
+  }
 
   return (
     <>
@@ -407,10 +536,7 @@ function MomentCard({ moment, currentUserId }) {
           overflow: hidden;
           transition: border-color 0.2s;
         }
-
-        .moment-card-own:hover {
-          border-color: rgba(232, 130, 106, 0.4);
-        }
+        .moment-card-own:hover { border-color: rgba(232, 130, 106, 0.4); }
 
         .moment-card-theirs {
           background: rgba(255, 255, 255, 0.04);
@@ -419,10 +545,7 @@ function MomentCard({ moment, currentUserId }) {
           overflow: hidden;
           transition: border-color 0.2s;
         }
-
-        .moment-card-theirs:hover {
-          border-color: rgba(255, 255, 255, 0.18);
-        }
+        .moment-card-theirs:hover { border-color: rgba(255, 255, 255, 0.18); }
 
         .card-author-tag {
           padding: 8px 16px 0;
@@ -431,17 +554,123 @@ function MomentCard({ moment, currentUserId }) {
           text-transform: uppercase;
           color: ${isOwn ? 'rgba(232,130,106,0.7)' : 'rgba(255,255,255,0.3)'};
         }
+
+        .moment-footer {
+          padding: 0 18px 14px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          position: relative;
+        }
+
+        .reaction-chips {
+          display: flex;
+          gap: 5px;
+          flex-wrap: wrap;
+          flex: 1;
+        }
+
+        .reaction-chip {
+          display: flex;
+          align-items: center;
+          gap: 3px;
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 50px;
+          padding: 3px 8px 3px 5px;
+          font-size: 0.82rem;
+          color: rgba(255,255,255,0.4);
+          animation: popIn 0.2s ease;
+        }
+
+        .reaction-chip.mine {
+          border-color: rgba(232, 130, 106, 0.3);
+          background: rgba(192, 80, 58, 0.12);
+          color: #e8826a;
+        }
+
+        @keyframes popIn {
+          0% { transform: scale(0.7); opacity: 0; }
+          70% { transform: scale(1.1); }
+          100% { transform: scale(1); opacity: 1; }
+        }
+
+        .react-icon-btn {
+          background: none;
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 50px;
+          padding: 5px 10px;
+          font-size: 0.9rem;
+          cursor: pointer;
+          color: rgba(255,255,255,0.3);
+          font-family: 'DM Sans', sans-serif;
+          transition: all 0.2s;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+
+        .react-icon-btn:hover {
+          border-color: rgba(255,255,255,0.2);
+          color: rgba(255,255,255,0.6);
+        }
+
+        .react-icon-btn.reacted {
+          border-color: rgba(232, 130, 106, 0.3);
+          color: #e8826a;
+        }
+
+        .react-icon-btn.disabled {
+          opacity: 0.25;
+          cursor: default;
+          pointer-events: none;
+        }
+
+        .picker-popup {
+          position: absolute;
+          bottom: 44px;
+          left: 0px;
+          background: #1a0c0c;
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 50px;
+          padding: 8px 12px;
+          display: flex;
+          gap: 6px;
+          z-index: 50;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+          animation: slideUp 0.15s ease;
+        }
+
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(8px) scale(0.95); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        .picker-emoji {
+          background: none;
+          border: none;
+          font-size: 1.3rem;
+          cursor: pointer;
+          padding: 2px 4px;
+          border-radius: 6px;
+          transition: transform 0.15s;
+          line-height: 1;
+        }
+
+        .picker-emoji:hover { transform: scale(1.3); }
+
+        .picker-emoji.selected {
+          background: rgba(232, 130, 106, 0.15);
+          border-radius: 6px;
+        }
       `}</style>
 
       <div className={isOwn ? 'moment-card-own' : 'moment-card-theirs'}>
         <div className="card-author-tag">
           {isOwn ? '✦ You' : `✦ ${moment.author?.display_name}`}
         </div>
-        <img
-          src={moment.photo_url}
-          alt="Moment"
-          className="moment-img"
-        />
+
+        <img src={moment.photo_url} alt="Moment" className="moment-img" />
+
         <div className="moment-body">
           <p className="moment-note">"{moment.note}"</p>
           <div className="moment-meta">
@@ -455,6 +684,47 @@ function MomentCard({ moment, currentUserId }) {
             </div>
             <span className="moment-date">{date}</span>
           </div>
+        </div>
+
+        <div className="moment-footer">
+         {/* Show partner's reactions on your own moments */}
+          {isOwn && Object.keys(reactionMap).length > 0 && (
+            <div className="reaction-chips">
+              {Object.entries(reactionMap).map(([emoji, reactors]) => (
+                <div key={emoji} className="reaction-chip">
+                  <span>{emoji}</span>
+                  {reactors.length > 1 && (
+                    <span style={{ fontSize: '0.72rem' }}>{reactors.length}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {/* React button — only visible on partner's moments */}
+          {!isOwn && (
+            <div style={{ position: 'relative' }} ref={pickerRef}>
+              <button
+                className={`react-icon-btn ${myReaction ? 'reacted' : ''}`}
+                onClick={() => setShowPicker(p => !p)}
+              >
+                {myReaction ? myReaction.emoji : '☺ React'}
+              </button>
+
+              {showPicker && (
+                <div className="picker-popup">
+                  {REACTIONS.map(emoji => (
+                    <button
+                      key={emoji}
+                      className={`picker-emoji ${myReaction?.emoji === emoji ? 'selected' : ''}`}
+                      onClick={() => handleReactClick(emoji)}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </>

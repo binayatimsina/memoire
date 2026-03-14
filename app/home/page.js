@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import MomentCard from '@/components/MomentCard'
 import HomeClient from '@/components/HomeClient'
 
 export default async function HomePage() {
@@ -21,7 +20,7 @@ export default async function HomePage() {
   if (connection) {
     const { data } = await supabase
       .from('moments')
-      .select('*, author:profiles(display_name, avatar_url)')
+      .select('*, author:profiles(display_name, avatar_url), reactions(*)')
       .eq('connection_id', connection.id)
       .order('created_at', { ascending: false })
       .limit(20)
