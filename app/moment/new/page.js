@@ -1,11 +1,11 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense  } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import imageCompression from 'browser-image-compression'
 import { v4 as uuidv4 } from 'uuid'
 
-export default function NewMomentPage() {
+function NewMomentContent() {
   const [photo, setPhoto] = useState(null)
   const [preview, setPreview] = useState(null)
   const [note, setNote] = useState('')
@@ -582,5 +582,13 @@ export default function NewMomentPage() {
         </div>
       </div>
     </>
+  )
+}
+
+export default function NewMomentPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewMomentContent />
+    </Suspense>
   )
 }
