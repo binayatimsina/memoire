@@ -1,7 +1,7 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import imageCompression from 'browser-image-compression'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -9,11 +9,45 @@ export default function NewMomentPage() {
   const [photo, setPhoto] = useState(null)
   const [preview, setPreview] = useState(null)
   const [note, setNote] = useState('')
-  const [step, setStep] = useState(1)
+  const searchParamsCheck = useSearchParams()
+  const [step, setStep] = useState(searchParamsCheck.get('connectionId') ? 2 : 1)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
+  const [connections, setConnections] = useState([])
+  const [selectedConnectionId, setSelectedConnectionId] = useState(null)
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+
+  useEffect(() => {
+    loadConnections()
+  }, [])
+
+  async function loadConnections() {
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const { data } = await supabase
+      .from('connections')
+      .select(`
+        id,
+        sender_id,
+        sender:profiles!connections_sender_id_fkey(id, display_name),
+        receiver:profiles!connections_receiver_id_fkey(id, display_name)
+      `)
+      .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+      .eq('status', 'active')
+
+    setConnections(data || [])
+
+    // If connectionId was passed in URL, pre-select it
+    const urlConnectionId = searchParams.get('connectionId')
+    if (urlConnectionId) {
+      setSelectedConnectionId(urlConnectionId)
+    } else if (data?.length === 1) {
+      // Auto select if only one connection
+      setSelectedConnectionId(data[0].id)
+    }
+  }
 
   async function handlePhotoSelect(e) {
     const file = e.target.files[0]
@@ -27,27 +61,18 @@ export default function NewMomentPage() {
 
     setPhoto(compressed)
     setPreview(URL.createObjectURL(compressed))
-    setStep(2)
+    setStep(3)
   }
 
   async function handleSubmit() {
-    if (!photo || !note.trim()) return
+    if (!photo || !note.trim() || !selectedConnectionId) return
     setUploading(true)
     setError('')
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
 
-      const { data: connection } = await supabase
-        .from('connections')
-        .select('id')
-        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-        .eq('status', 'active')
-        .single()
-
-      if (!connection) throw new Error('No active connection found')
-
-      const filename = `${connection.id}/${uuidv4()}.jpg`
+      const filename = `${selectedConnectionId}/${uuidv4()}.jpg`
       const { error: uploadError } = await supabase.storage
         .from('moments')
         .upload(filename, photo, {
@@ -63,7 +88,7 @@ export default function NewMomentPage() {
         .getPublicUrl(filename)
 
       const { error: insertError } = await supabase.from('moments').insert({
-        connection_id: connection.id,
+        connection_id: selectedConnectionId,
         author_id: user.id,
         photo_url: urlData.publicUrl,
         note: note.trim(),
@@ -71,11 +96,20 @@ export default function NewMomentPage() {
 
       if (insertError) throw insertError
 
-      router.push('/home')
+      // Go back to the feed for this connection
+      router.push(`/feed/${selectedConnectionId}`)
     } catch (err) {
       setError(err.message)
       setUploading(false)
     }
+  }
+
+  // Get partner name for a connection
+  function getPartnerName(connection) {
+    const userId = connections.find(c => c.id === connection.id)
+    return connection.sender_id === userId?.sender_id
+      ? connection.receiver?.display_name
+      : connection.sender?.display_name
   }
 
   return (
@@ -129,10 +163,7 @@ export default function NewMomentPage() {
           flex-shrink: 0;
         }
 
-        .back-btn:hover {
-          border-color: rgba(255,255,255,0.25);
-          color: rgba(255,255,255,0.7);
-        }
+        .back-btn:hover { border-color: rgba(255,255,255,0.25); color: rgba(255,255,255,0.7); }
 
         .nm-title {
           font-family: 'Playfair Display', serif;
@@ -148,30 +179,95 @@ export default function NewMomentPage() {
           padding: 32px 20px 60px;
         }
 
-        /* STEP INDICATORS */
-        .steps {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 32px;
-        }
+        .steps { display: flex; align-items: center; gap: 8px; margin-bottom: 32px; }
 
         .step-dot {
           width: 8px;
           height: 8px;
           border-radius: 50%;
-          background: rgba(255,255,255,0.15);
+          background: rgba(255,255,255,0.1);
           transition: all 0.3s;
         }
 
-        .step-dot.active {
-          background: #e8826a;
-          width: 24px;
-          border-radius: 4px;
+        .step-dot.active { background: #e8826a; width: 24px; border-radius: 4px; }
+        .step-dot.done { background: rgba(232,130,106,0.4); }
+
+        /* CONNECTION PICKER */
+        .section-label {
+          font-size: 0.72rem;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: rgba(255,255,255,0.3);
+          margin-bottom: 12px;
+          display: block;
         }
 
-        .step-dot.done {
-          background: rgba(232,130,106,0.4);
+        .connection-list {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          margin-bottom: 28px;
+        }
+
+        .connection-option {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 12px;
+          padding: 14px 16px;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .connection-option:hover {
+          background: rgba(255,255,255,0.07);
+          border-color: rgba(255,255,255,0.15);
+        }
+
+        .connection-option.selected {
+          background: rgba(192, 80, 58, 0.12);
+          border-color: rgba(232, 130, 106, 0.35);
+        }
+
+        .option-avatar {
+          width: 38px;
+          height: 38px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #c0503a, #e8826a);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: 'Playfair Display', serif;
+          font-size: 1rem;
+          color: #fff;
+          flex-shrink: 0;
+        }
+
+        .option-name {
+          font-size: 0.95rem;
+          color: rgba(255,255,255,0.85);
+          flex: 1;
+        }
+
+        .option-check {
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          border: 1px solid rgba(255,255,255,0.15);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.7rem;
+          color: #e8826a;
+          flex-shrink: 0;
+          transition: all 0.2s;
+        }
+
+        .connection-option.selected .option-check {
+          background: rgba(232,130,106,0.2);
+          border-color: rgba(232,130,106,0.5);
         }
 
         /* UPLOAD ZONE */
@@ -184,7 +280,6 @@ export default function NewMomentPage() {
           overflow: hidden;
           display: block;
           width: 100%;
-          text-decoration: none;
         }
 
         .upload-zone:hover {
@@ -214,9 +309,7 @@ export default function NewMomentPage() {
           transition: transform 0.2s;
         }
 
-        .upload-zone:hover .upload-icon {
-          transform: scale(1.08);
-        }
+        .upload-zone:hover .upload-icon { transform: scale(1.08); }
 
         .upload-title {
           font-family: 'Playfair Display', serif;
@@ -224,28 +317,19 @@ export default function NewMomentPage() {
           color: rgba(255,255,255,0.8);
         }
 
-        .upload-sub {
-          font-size: 0.78rem;
-          color: rgba(255,255,255,0.25);
-          letter-spacing: 0.05em;
-        }
+        .upload-sub { font-size: 0.78rem; color: rgba(255,255,255,0.25); letter-spacing: 0.05em; }
 
-        .upload-options {
-          display: flex;
-          gap: 10px;
-          margin-top: 8px;
-        }
+        .upload-options { display: flex; gap: 10px; margin-top: 8px; }
 
         .upload-chip {
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(255,255,255,0.07);
           border-radius: 20px;
           padding: 6px 14px;
           font-size: 0.75rem;
-          color: rgba(255,255,255,0.35);
+          color: rgba(255,255,255,0.3);
         }
 
-        /* STEP 2 — NOTE */
         .preview-wrap {
           position: relative;
           border-radius: 16px;
@@ -253,12 +337,7 @@ export default function NewMomentPage() {
           margin-bottom: 20px;
         }
 
-        .preview-img {
-          width: 100%;
-          max-height: 300px;
-          object-fit: cover;
-          display: block;
-        }
+        .preview-img { width: 100%; max-height: 300px; object-fit: cover; display: block; }
 
         .preview-change {
           position: absolute;
@@ -266,7 +345,7 @@ export default function NewMomentPage() {
           right: 12px;
           background: rgba(0,0,0,0.55);
           backdrop-filter: blur(8px);
-          border: 1px solid rgba(255,255,255,0.15);
+          border: 1px solid rgba(255,255,255,0.1);
           border-radius: 8px;
           color: rgba(255,255,255,0.7);
           font-family: 'DM Sans', sans-serif;
@@ -276,23 +355,18 @@ export default function NewMomentPage() {
           transition: all 0.2s;
         }
 
-        .preview-change:hover {
-          background: rgba(0,0,0,0.75);
-          color: #fff;
-        }
+        .preview-change:hover { background: rgba(0,0,0,0.75); color: #fff; }
 
         .note-box {
           background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(255,255,255,0.07);
           border-radius: 16px;
           padding: 18px;
           margin-bottom: 8px;
           transition: border-color 0.2s;
         }
 
-        .note-box:focus-within {
-          border-color: rgba(232,130,106,0.4);
-        }
+        .note-box:focus-within { border-color: rgba(232,130,106,0.4); }
 
         .note-label {
           font-size: 0.7rem;
@@ -314,13 +388,9 @@ export default function NewMomentPage() {
           color: rgba(255,255,255,0.85);
           resize: none;
           line-height: 1.7;
-          placeholder-color: rgba(255,255,255,0.2);
         }
 
-        .note-textarea::placeholder {
-          color: rgba(255,255,255,0.2);
-          font-style: italic;
-        }
+        .note-textarea::placeholder { color: rgba(255,255,255,0.2); font-style: italic; }
 
         .note-footer {
           display: flex;
@@ -329,12 +399,7 @@ export default function NewMomentPage() {
           margin-bottom: 24px;
         }
 
-        .char-count {
-          font-size: 0.75rem;
-          color: rgba(255,255,255,0.2);
-          transition: color 0.2s;
-        }
-
+        .char-count { font-size: 0.75rem; color: rgba(255,255,255,0.2); transition: color 0.2s; }
         .char-count.warn { color: #e8826a; }
 
         .error-box {
@@ -362,15 +427,26 @@ export default function NewMomentPage() {
           transition: opacity 0.2s, transform 0.15s;
         }
 
-        .submit-btn:hover:not(:disabled) {
-          opacity: 0.92;
-          transform: translateY(-1px);
+        .submit-btn:hover:not(:disabled) { opacity: 0.92; transform: translateY(-1px); }
+        .submit-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+        .next-btn {
+          width: 100%;
+          background: linear-gradient(135deg, #c0503a 0%, #e8826a 100%);
+          border: none;
+          border-radius: 12px;
+          padding: 15px;
+          font-size: 0.9rem;
+          font-weight: 500;
+          color: #fff;
+          font-family: 'DM Sans', sans-serif;
+          cursor: pointer;
+          letter-spacing: 0.03em;
+          transition: opacity 0.2s, transform 0.15s;
         }
 
-        .submit-btn:disabled {
-          opacity: 0.35;
-          cursor: not-allowed;
-        }
+        .next-btn:hover:not(:disabled) { opacity: 0.92; transform: translateY(-1px); }
+        .next-btn:disabled { opacity: 0.35; cursor: not-allowed; }
       `}</style>
 
       <div className="nm-root">
@@ -379,7 +455,16 @@ export default function NewMomentPage() {
         <header className="nm-header">
           <button
             className="back-btn"
-            onClick={() => step === 2 ? setStep(1) : router.back()}
+            onClick={() => {
+              const urlConnectionId = searchParams.get('connectionId')
+              if (step === 2 && urlConnectionId) {
+                router.push(`/feed/${urlConnectionId}`)
+              } else if (step > 1) {
+                setStep(step - 1)
+              } else {
+                router.back()
+              }
+            }}
           >
             ← Back
           </button>
@@ -387,12 +472,52 @@ export default function NewMomentPage() {
         </header>
 
         <div className="nm-body">
+          {/* Step indicators */}
           <div className="steps">
-            <div className={`step-dot ${step >= 1 ? 'active' : ''} ${step > 1 ? 'done' : ''}`} />
-            <div className={`step-dot ${step >= 2 ? 'active' : ''}`} />
+            {[1, 2, 3].map(s => (
+              <div key={s} className={`step-dot ${step === s ? 'active' : ''} ${step > s ? 'done' : ''}`} />
+            ))}
           </div>
 
+          {/* Step 1 — Pick connection (only if more than one) */}
           {step === 1 && (
+            <div>
+              <span className="section-label">Who are you sharing with?</span>
+              <div className="connection-list">
+                {connections.map(conn => {
+                  const partnerName = conn.sender_id === conn.sender?.id
+                    ? conn.receiver?.display_name
+                    : conn.sender?.display_name
+                  const isSelected = selectedConnectionId === conn.id
+                  return (
+                    <div
+                      key={conn.id}
+                      className={`connection-option ${isSelected ? 'selected' : ''}`}
+                      onClick={() => setSelectedConnectionId(conn.id)}
+                    >
+                      <div className="option-avatar">
+                        {partnerName?.[0]?.toUpperCase()}
+                      </div>
+                      <span className="option-name">{partnerName}</span>
+                      <div className="option-check">
+                        {isSelected && '✓'}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              <button
+                className="next-btn"
+                disabled={!selectedConnectionId}
+                onClick={() => setStep(2)}
+              >
+                Continue →
+              </button>
+            </div>
+          )}
+
+          {/* Step 2 — Photo */}
+          {step === 2 && (
             <label className="upload-zone">
               <div className="upload-inner">
                 <div className="upload-icon">📷</div>
@@ -413,13 +538,14 @@ export default function NewMomentPage() {
             </label>
           )}
 
-          {step === 2 && (
+          {/* Step 3 — Note */}
+          {step === 3 && (
             <div>
               <div className="preview-wrap">
                 <img src={preview} alt="Preview" className="preview-img" />
                 <button
                   className="preview-change"
-                  onClick={() => { setStep(1); setPhoto(null); setPreview(null) }}
+                  onClick={() => { setStep(2); setPhoto(null); setPreview(null) }}
                 >
                   Change photo
                 </button>

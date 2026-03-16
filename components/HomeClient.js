@@ -5,58 +5,18 @@ import { createClient } from '@/lib/supabase/client'
 
 const REACTIONS = ['❤️', '😊', '🥹', '😂', '😢', '🎉', '👍']
 
-export default function HomeClient({ user, profile, connection, initialMoments }) {
-  const [moments, setMoments] = useState(initialMoments)
+export default function HomeClient({ user, profile, connections }) {
   const router = useRouter()
   const supabase = createClient()
-
-  const partner = connection
-    ? (connection.sender_id === user.id ? connection.receiver : connection.sender)
-    : null
 
   async function handleSignOut() {
     await supabase.auth.signOut()
     router.push('/login')
   }
 
-  async function handleReaction(momentId, emoji) {
-    const moment = moments.find(m => m.id === momentId)
-    const existingReaction = moment.reactions?.find(r => r.author_id === user.id)
-
-    if (existingReaction?.emoji === emoji) {
-      await supabase.from('reactions').delete().eq('id', existingReaction.id)
-      setMoments(prev => prev.map(m => m.id === momentId ? {
-        ...m,
-        reactions: m.reactions.filter(r => r.id !== existingReaction.id)
-      } : m))
-      return
-    }
-
-    if (existingReaction) {
-      const { data } = await supabase
-        .from('reactions').update({ emoji }).eq('id', existingReaction.id).select().single()
-      setMoments(prev => prev.map(m => m.id === momentId ? {
-        ...m,
-        reactions: m.reactions.map(r => r.id === existingReaction.id ? data : r)
-      } : m))
-      return
-    }
-
-    const { data } = await supabase
-      .from('reactions').insert({ moment_id: momentId, author_id: user.id, emoji }).select().single()
-    setMoments(prev => prev.map(m => m.id === momentId ? {
-      ...m,
-      reactions: [...(m.reactions || []), data]
-    } : m))
-  }
-
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500&display=swap');
-
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-
         .home-root {
           min-height: 100vh;
           background: #0f0707;
@@ -100,32 +60,6 @@ export default function HomeClient({ user, profile, connection, initialMoments }
 
         .header-logo span { color: #e8826a; }
 
-        .header-right {
-          display: flex;
-          flex-direction: column;
-          align-items: flex-end;
-          gap: 2px;
-          min-width: 0;
-        }
-
-        .partner-label {
-          font-size: 0.68rem;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-          color: rgba(255,255,255,0.3);
-          white-space: nowrap;
-        }
-
-        .partner-name {
-          font-size: 0.88rem;
-          font-weight: 500;
-          color: #e8826a;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          max-width: 120px;
-        }
-
         .signout-btn {
           background: none;
           border: 1px solid rgba(255,255,255,0.1);
@@ -145,7 +79,7 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           color: rgba(255,255,255,0.6);
         }
 
-        .feed-wrap {
+        .page-wrap {
           position: relative;
           z-index: 1;
           max-width: 560px;
@@ -153,9 +87,19 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           padding: 24px 16px 100px;
           display: flex;
           flex-direction: column;
-          gap: 20px;
+          gap: 14px;
         }
 
+        .page-heading {
+          font-family: 'Playfair Display', serif;
+          font-size: 1rem;
+          color: rgba(255,255,255,0.3);
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          margin-bottom: 4px;
+        }
+
+        /* EMPTY STATE */
         .empty-state {
           display: flex;
           flex-direction: column;
@@ -207,79 +151,88 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           letter-spacing: 0.02em;
         }
 
-        .invite-btn:hover {
-          opacity: 0.9;
-          transform: translateY(-1px);
-        }
+        .invite-btn:hover { opacity: 0.9; transform: translateY(-1px); }
 
-        .moment-card {
+        /* CONNECTION CARD */
+        .connection-card {
           background: rgba(255,255,255,0.04);
           border: 1px solid rgba(255,255,255,0.07);
           border-radius: 16px;
-          overflow: hidden;
-          transition: border-color 0.2s;
-        }
-
-        .moment-card:hover {
-          border-color: rgba(232, 130, 106, 0.2);
-        }
-
-        .moment-img {
-          width: 100%;
-          max-height: 360px;
-          object-fit: cover;
-          display: block;
-        }
-
-        .moment-body {
-          padding: 16px 18px 14px;
-        }
-
-        .moment-note {
-          font-family: 'Playfair Display', serif;
-          font-style: italic;
-          font-size: 1rem;
-          color: rgba(255,255,255,0.82);
-          line-height: 1.6;
-          margin-bottom: 14px;
-        }
-
-        .moment-meta {
+          padding: 18px 20px;
+          cursor: pointer;
+          transition: all 0.2s;
           display: flex;
           align-items: center;
-          justify-content: space-between;
+          gap: 16px;
+          text-decoration: none;
         }
 
-        .moment-author {
-          display: flex;
-          align-items: center;
-          gap: 8px;
+        .connection-card:hover {
+          background: rgba(255,255,255,0.07);
+          border-color: rgba(232, 130, 106, 0.25);
+          transform: translateY(-1px);
         }
 
-        .author-avatar {
-          width: 26px;
-          height: 26px;
+        .connection-avatar {
+          width: 48px;
+          height: 48px;
           border-radius: 50%;
           background: linear-gradient(135deg, #c0503a, #e8826a);
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 0.7rem;
-          font-weight: 600;
+          font-family: 'Playfair Display', serif;
+          font-size: 1.2rem;
           color: #fff;
           flex-shrink: 0;
         }
 
-        .author-name {
-          font-size: 0.8rem;
-          color: rgba(255,255,255,0.4);
+        .connection-info {
+          flex: 1;
+          min-width: 0;
         }
 
-        .moment-date {
-          font-size: 0.75rem;
+        .connection-name {
+          font-family: 'Playfair Display', serif;
+          font-size: 1.1rem;
+          color: rgba(255,255,255,0.9);
+          margin-bottom: 4px;
+        }
+
+        .connection-preview {
+          font-size: 0.82rem;
+          color: rgba(255,255,255,0.35);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          font-style: italic;
+        }
+
+        .connection-meta {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 4px;
+          flex-shrink: 0;
+        }
+
+        .connection-date {
+          font-size: 0.72rem;
           color: rgba(255,255,255,0.25);
         }
 
+        .connection-count {
+          font-size: 0.72rem;
+          color: rgba(232,130,106,0.6);
+        }
+
+        .connection-arrow {
+          font-size: 1rem;
+          color: rgba(255,255,255,0.2);
+          margin-left: 4px;
+        }
+
+        /* FAB */
         .fab {
           position: fixed;
           bottom: 28px;
@@ -308,113 +261,17 @@ export default function HomeClient({ user, profile, connection, initialMoments }
           box-shadow: 0 8px 32px rgba(192, 80, 58, 0.55);
         }
 
-        .fab:active {
-          transform: translateX(50%) translateY(0);
-        }
+        .fab:active { transform: translateX(50%) translateY(0); }
+        .fab-icon { font-size: 1.2rem; line-height: 1; }
 
-        .fab-icon {
-          font-size: 1.2rem;
-          line-height: 1;
-        }
-
-        .hearts {
-          position: fixed;
-          inset: 0;
-          pointer-events: none;
-          z-index: 0;
-          overflow: hidden;
-        }
-
-        .heart {
-          position: absolute;
-          opacity: 0;
-          color: rgba(232,130,106,0.4);
-          animation: floatUp 9s ease-in infinite;
-        }
+        .hearts { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+        .heart { position: absolute; opacity: 0; color: rgba(232,130,106,0.4); animation: floatUp 9s ease-in infinite; }
 
         @keyframes floatUp {
           0% { opacity: 0; transform: translateY(0) scale(0.8); }
           10% { opacity: 0.12; }
           90% { opacity: 0.03; }
           100% { opacity: 0; transform: translateY(-100vh) scale(1.1); }
-        }
-
-        /* REACTIONS */
-        .reactions-area {
-          border-top: 1px solid rgba(255,255,255,0.06);
-          padding: 12px 18px 14px;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-
-        .reaction-picker {
-          display: flex;
-          gap: 6px;
-          flex-wrap: wrap;
-        }
-
-        .reaction-btn {
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 50px;
-          padding: 6px 10px;
-          font-size: 1.1rem;
-          cursor: pointer;
-          transition: all 0.15s;
-          line-height: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .reaction-btn:hover {
-          background: rgba(255,255,255,0.08);
-          border-color: rgba(255,255,255,0.2);
-          transform: scale(1.15);
-        }
-
-        .reaction-btn.selected {
-          background: rgba(192, 80, 58, 0.12);
-          border-color: rgba(232, 130, 106, 0.2);
-          transform: scale(1.1);
-        }
-
-        .reaction-btn.own-moment {
-          opacity: 0.4;
-          cursor: default;
-          pointer-events: none;
-        }
-
-        .reaction-display {
-          display: flex;
-          gap: 6px;
-          flex-wrap: wrap;
-        }
-
-        .reaction-chip {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 50px;
-          padding: 3px 10px 3px 6px;
-          font-size: 0.85rem;
-          color: rgba(255,255,255,0.4);
-          animation: popIn 0.2s ease;
-        }
-
-        .reaction-chip.mine {
-          border-color: rgba(232, 130, 106, 0.2);
-          background: rgba(192, 80, 58, 0.12);
-          color: #e8826a;
-        }
-
-        @keyframes popIn {
-          0% { transform: scale(0.7); opacity: 0; }
-          70% { transform: scale(1.1); }
-          100% { transform: scale(1); opacity: 1; }
         }
       `}</style>
 
@@ -429,32 +286,22 @@ export default function HomeClient({ user, profile, connection, initialMoments }
               animationDelay: `${i * 1.8}s`,
               animationDuration: `${8 + i * 0.9}s`,
               fontSize: `${0.8 + i * 0.1}rem`
-            }}>♡</div>
+            }}>✦</div>
           ))}
         </div>
 
+        {/* Header */}
         <header className="header">
-          <div className="header-logo">
-            Memoire<span>.</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            {partner && (
-              <div className="header-right">
-                <span className="partner-label">Connected with</span>
-                <span className="partner-name">{partner.display_name}</span>
-              </div>
-            )}
-            <button className="signout-btn" onClick={handleSignOut}>
-              Sign out
-            </button>
-          </div>
+          <div className="header-logo">Memoire<span>.</span></div>
+          <button className="signout-btn" onClick={handleSignOut}>Sign out</button>
         </header>
 
-        <div className="feed-wrap">
-          {!connection ? (
+        {/* Content */}
+        <div className="page-wrap">
+          {connections.length === 0 ? (
             <div className="empty-state">
               <div className="empty-emoji">🤝</div>
-              <h2 className="empty-title">Share moments with others</h2>
+              <h2 className="empty-title">Share moments with someone you care about</h2>
               <p className="empty-sub">
                 A friend, a partner, a sibling — invite anyone you want to share memories with
               </p>
@@ -462,270 +309,56 @@ export default function HomeClient({ user, profile, connection, initialMoments }
                 Send an Invite
               </button>
             </div>
-          ) : moments.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-emoji">🌱</div>
-              <h2 className="empty-title">Your shared story starts here</h2>
-              <p className="empty-sub">
-                Post your first photo and note — {partner?.display_name} will see it instantly
-              </p>
-            </div>
           ) : (
-            moments.map(moment => (
-              <MomentCard
-                key={moment.id}
-                moment={moment}
-                currentUserId={user.id}
-                onReact={handleReaction}
-              />
-            ))
+            <>
+              <p className="page-heading">Your Connections</p>
+              {connections.map(connection => {
+                const partner = connection.sender_id === user.id
+                  ? connection.receiver
+                  : connection.sender
+
+                const preview = connection.latestMoment
+                  ? `"${connection.latestMoment.note}"`
+                  : 'No moments yet — be the first!'
+
+                const date = connection.latestMoment
+                  ? new Date(connection.latestMoment.created_at).toLocaleDateString('en-US', {
+                      month: 'short', day: 'numeric'
+                    })
+                  : null
+
+                return (
+                  <div
+                    key={connection.id}
+                    className="connection-card"
+                    onClick={() => router.push(`/feed/${connection.id}`)}
+                  >
+                    <div className="connection-avatar">
+                      {partner?.display_name?.[0]?.toUpperCase()}
+                    </div>
+                    <div className="connection-info">
+                      <div className="connection-name">{partner?.display_name}</div>
+                      <div className="connection-preview">{preview}</div>
+                    </div>
+                    <div className="connection-meta">
+                      {date && <span className="connection-date">{date}</span>}
+                      <span className="connection-count">
+                        {connection.totalMoments} {connection.totalMoments === 1 ? 'moment' : 'moments'}
+                      </span>
+                    </div>
+                    <span className="connection-arrow">›</span>
+                  </div>
+                )
+              })}
+            </>
           )}
         </div>
 
-        {connection && (
-          <button className="fab" onClick={() => router.push('/moment/new')}>
-            <span className="fab-icon">+</span>
-            New Moment
-          </button>
-        )}
-      </div>
-    </>
-  )
-}
-
-function MomentCard({ moment, currentUserId, onReact }) {
-  const [showPicker, setShowPicker] = useState(false)
-  const pickerRef = useRef(null)
-
-  useEffect(() => {
-    if (!showPicker) return
-    function handleClickOutside(e) {
-      if (pickerRef.current && !pickerRef.current.contains(e.target)) {
-        setShowPicker(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showPicker])
-
-  const isOwn = moment.author_id === currentUserId
-  const date = new Date(moment.created_at).toLocaleDateString('en-US', {
-    month: 'long', day: 'numeric', year: 'numeric'
-  })
-
-  const reactionMap = {}
-  moment.reactions?.forEach(r => {
-    if (!reactionMap[r.emoji]) reactionMap[r.emoji] = []
-    reactionMap[r.emoji].push(r)
-  })
-
-  const myReaction = moment.reactions?.find(r => r.author_id === currentUserId)
-
-  function handleReactClick(emoji) {
-    onReact(moment.id, emoji)
-    setShowPicker(false)
-  }
-
-  return (
-    <>
-      <style>{`
-        .moment-card-own {
-          background: rgba(192, 80, 58, 0.12);
-          border: 1px solid rgba(232, 130, 106, 0.2);
-          border-radius: 16px;
-          overflow: hidden;
-          transition: border-color 0.2s;
-        }
-        .moment-card-own:hover { border-color: rgba(232, 130, 106, 0.4); }
-
-        .moment-card-theirs {
-          background: rgba(255, 255, 255, 0.04);
-          border: 1px solid rgba(255, 255, 255, 0.09);
-          border-radius: 16px;
-          overflow: hidden;
-          transition: border-color 0.2s;
-        }
-        .moment-card-theirs:hover { border-color: rgba(255, 255, 255, 0.18); }
-
-        .card-author-tag {
-          padding: 8px 16px 0;
-          font-size: 0.7rem;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          color: ${isOwn ? 'rgba(232,130,106,0.7)' : 'rgba(255,255,255,0.3)'};
-        }
-
-        .moment-footer {
-          padding: 0 18px 14px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          position: relative;
-        }
-
-        .reaction-chips {
-          display: flex;
-          gap: 5px;
-          flex-wrap: wrap;
-          flex: 1;
-        }
-
-        .reaction-chip {
-          display: flex;
-          align-items: center;
-          gap: 3px;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 50px;
-          padding: 3px 8px 3px 5px;
-          font-size: 0.82rem;
-          color: rgba(255,255,255,0.4);
-          animation: popIn 0.2s ease;
-        }
-
-        .reaction-chip.mine {
-          border-color: rgba(232, 130, 106, 0.3);
-          background: rgba(192, 80, 58, 0.12);
-          color: #e8826a;
-        }
-
-        @keyframes popIn {
-          0% { transform: scale(0.7); opacity: 0; }
-          70% { transform: scale(1.1); }
-          100% { transform: scale(1); opacity: 1; }
-        }
-
-        .react-icon-btn {
-          background: none;
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 50px;
-          padding: 5px 10px;
-          font-size: 0.9rem;
-          cursor: pointer;
-          color: rgba(255,255,255,0.3);
-          font-family: 'DM Sans', sans-serif;
-          transition: all 0.2s;
-          white-space: nowrap;
-          flex-shrink: 0;
-        }
-
-        .react-icon-btn:hover {
-          border-color: rgba(255,255,255,0.2);
-          color: rgba(255,255,255,0.6);
-        }
-
-        .react-icon-btn.reacted {
-          border-color: rgba(232, 130, 106, 0.3);
-          color: #e8826a;
-        }
-
-        .react-icon-btn.disabled {
-          opacity: 0.25;
-          cursor: default;
-          pointer-events: none;
-        }
-
-        .picker-popup {
-          position: absolute;
-          bottom: 44px;
-          left: 0px;
-          background: #1a0c0c;
-          border: 1px solid rgba(255,255,255,0.1);
-          border-radius: 50px;
-          padding: 8px 12px;
-          display: flex;
-          gap: 6px;
-          z-index: 50;
-          box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-          animation: slideUp 0.15s ease;
-        }
-
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(8px) scale(0.95); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-
-        .picker-emoji {
-          background: none;
-          border: none;
-          font-size: 1.3rem;
-          cursor: pointer;
-          padding: 2px 4px;
-          border-radius: 6px;
-          transition: transform 0.15s;
-          line-height: 1;
-        }
-
-        .picker-emoji:hover { transform: scale(1.3); }
-
-        .picker-emoji.selected {
-          background: rgba(232, 130, 106, 0.15);
-          border-radius: 6px;
-        }
-      `}</style>
-
-      <div className={isOwn ? 'moment-card-own' : 'moment-card-theirs'}>
-        <div className="card-author-tag">
-          {isOwn ? '✦ You' : `✦ ${moment.author?.display_name}`}
-        </div>
-
-        <img src={moment.photo_url} alt="Moment" className="moment-img" />
-
-        <div className="moment-body">
-          <p className="moment-note">"{moment.note}"</p>
-          <div className="moment-meta">
-            <div className="moment-author">
-              <div className="author-avatar">
-                {moment.author?.display_name?.[0]?.toUpperCase()}
-              </div>
-              <span className="author-name">
-                {isOwn ? 'You' : moment.author?.display_name}
-              </span>
-            </div>
-            <span className="moment-date">{date}</span>
-          </div>
-        </div>
-
-        <div className="moment-footer">
-         {/* Show partner's reactions on your own moments */}
-          {isOwn && Object.keys(reactionMap).length > 0 && (
-            <div className="reaction-chips">
-              {Object.entries(reactionMap).map(([emoji, reactors]) => (
-                <div key={emoji} className="reaction-chip">
-                  <span>{emoji}</span>
-                  {reactors.length > 1 && (
-                    <span style={{ fontSize: '0.72rem' }}>{reactors.length}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-          {/* React button — only visible on partner's moments */}
-          {!isOwn && (
-            <div style={{ position: 'relative' }} ref={pickerRef}>
-              <button
-                className={`react-icon-btn ${myReaction ? 'reacted' : ''}`}
-                onClick={() => setShowPicker(p => !p)}
-              >
-                {myReaction ? myReaction.emoji : '☺ React'}
-              </button>
-
-              {showPicker && (
-                <div className="picker-popup">
-                  {REACTIONS.map(emoji => (
-                    <button
-                      key={emoji}
-                      className={`picker-emoji ${myReaction?.emoji === emoji ? 'selected' : ''}`}
-                      onClick={() => handleReactClick(emoji)}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        {/* FAB — always visible to invite new connections */}
+        <button className="fab" onClick={() => router.push('/connect/invite')}>
+          <span className="fab-icon">+</span>
+          New Connection
+        </button>
       </div>
     </>
   )
