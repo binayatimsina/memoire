@@ -1,13 +1,41 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
-const REACTIONS = ['❤️', '😊', '🥹', '😂', '😢', '🎉', '👍']
-
 export default function HomeClient({ user, profile, connections }) {
+  const [requestCount, setRequestCount] = useState(0)
   const router = useRouter()
   const supabase = createClient()
+
+  useEffect(() => {
+    loadRequestCount()
+
+    // Listen for new requests in real time
+    const channel = supabase
+      .channel('requests')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'connection_requests',
+        filter: `receiver_id=eq.${user.id}`
+      }, () => {
+        loadRequestCount()
+      })
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [])
+
+  async function loadRequestCount() {
+    const { count } = await supabase
+      .from('connection_requests')
+      .select('*', { count: 'exact', head: true })
+      .eq('receiver_id', user.id)
+      .eq('status', 'pending')
+
+    setRequestCount(count || 0)
+  }
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -17,6 +45,10 @@ export default function HomeClient({ user, profile, connections }) {
   return (
     <>
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500&display=swap');
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
         .home-root {
           min-height: 100vh;
           background: #0f0707;
@@ -59,6 +91,62 @@ export default function HomeClient({ user, profile, connections }) {
         }
 
         .header-logo span { color: #e8826a; }
+
+        .header-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .icon-btn {
+          background: none;
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 8px;
+          color: rgba(255,255,255,0.4);
+          font-family: 'DM Sans', sans-serif;
+          font-size: 0.8rem;
+          padding: 7px 13px;
+          cursor: pointer;
+          transition: all 0.2s;
+          white-space: nowrap;
+          position: relative;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .icon-btn:hover {
+          border-color: rgba(255,255,255,0.25);
+          color: rgba(255,255,255,0.7);
+        }
+
+        .icon-btn.requests-btn:hover {
+          border-color: rgba(232,130,106,0.4);
+          color: #e8826a;
+        }
+
+        .request-badge {
+          background: linear-gradient(135deg, #c0503a, #e8826a);
+          color: #fff;
+          font-size: 0.65rem;
+          font-weight: 700;
+          border-radius: 50%;
+          width: 18px;
+          height: 18px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: absolute;
+          top: -6px;
+          right: -6px;
+          animation: popIn 0.3s ease;
+        }
+
+        @keyframes popIn {
+          0% { transform: scale(0); }
+          70% { transform: scale(1.2); }
+          100% { transform: scale(1); }
+        }
 
         .signout-btn {
           background: none;
@@ -137,7 +225,7 @@ export default function HomeClient({ user, profile, connections }) {
           margin-bottom: 32px;
         }
 
-        .invite-btn {
+        .search-btn {
           background: linear-gradient(135deg, #c0503a 0%, #e8826a 100%);
           border: none;
           border-radius: 12px;
@@ -151,7 +239,7 @@ export default function HomeClient({ user, profile, connections }) {
           letter-spacing: 0.02em;
         }
 
-        .invite-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+        .search-btn:hover { opacity: 0.9; transform: translateY(-1px); }
 
         /* CONNECTION CARD */
         .connection-card {
@@ -164,7 +252,6 @@ export default function HomeClient({ user, profile, connections }) {
           display: flex;
           align-items: center;
           gap: 16px;
-          text-decoration: none;
         }
 
         .connection-card:hover {
@@ -293,7 +380,32 @@ export default function HomeClient({ user, profile, connections }) {
         {/* Header */}
         <header className="header">
           <div className="header-logo">Memoire<span>.</span></div>
-          <button className="signout-btn" onClick={handleSignOut}>Sign out</button>
+          <div className="header-actions">
+            {/* Search button */}
+            <button
+              className="icon-btn"
+              onClick={() => router.push('/search')}
+              title="Find someone"
+            >
+              🔍
+            </button>
+
+            {/* Requests button */}
+            <button
+              className="icon-btn requests-btn"
+              onClick={() => router.push('/requests')}
+              title="Connection requests"
+            >
+              👥
+              {requestCount > 0 && (
+                <span className="request-badge">{requestCount}</span>
+              )}
+            </button>
+
+            <button className="signout-btn" onClick={handleSignOut}>
+              Sign out
+            </button>
+          </div>
         </header>
 
         {/* Content */}
@@ -303,10 +415,13 @@ export default function HomeClient({ user, profile, connections }) {
               <div className="empty-emoji">🤝</div>
               <h2 className="empty-title">Share moments with someone you care about</h2>
               <p className="empty-sub">
-                A friend, a partner, a sibling — invite anyone you want to share memories with
+                Search for a friend by their username to get started
               </p>
-              <button className="invite-btn" onClick={() => router.push('/connect/invite')}>
-                Send an Invite
+              <button
+                className="search-btn"
+                onClick={() => router.push('/search')}
+              >
+                🔍 Find Someone
               </button>
             </div>
           ) : (
@@ -354,8 +469,11 @@ export default function HomeClient({ user, profile, connections }) {
           )}
         </div>
 
-        {/* FAB — always visible to invite new connections */}
-        <button className="fab" onClick={() => router.push('/connect/invite')}>
+        {/* FAB */}
+        <button
+          className="fab"
+          onClick={() => router.push('/search')}
+        >
           <span className="fab-icon">+</span>
           New Connection
         </button>
